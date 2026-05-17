@@ -169,6 +169,18 @@ func (m Model) View() string {
 		projectName = m.cfg.ProjectPath
 	}
 
+	width := m.width
+	if width == 0 {
+		width = 80
+	}
+	const margin = 2
+	// borderStyle has 1px border + 1px padding on each side (4 total overhead).
+	// Target outer border width = terminal width - 2 margins on each side.
+	contentWidth := width - margin*2 - 4
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render(fmt.Sprintf("Treely  %s", projectName)))
 	sb.WriteString("\n\n")
@@ -202,5 +214,7 @@ func (m Model) View() string {
 	sb.WriteString("\n")
 	sb.WriteString(footerStyle.Render("↑↓/jk navigate · enter/space activate · R restart daemon · K kill daemon · q quit"))
 
-	return borderStyle.Render(sb.String())
+	return lipgloss.NewStyle().MarginLeft(margin).Render(
+		borderStyle.Width(contentWidth).Render(sb.String()),
+	)
 }
