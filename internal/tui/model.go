@@ -81,6 +81,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter", " ":
 			if len(m.worktrees) > 0 && m.activating == "" {
 				wt := m.worktrees[m.cursor]
+				if wt.Status == "active" {
+					return m, func() tea.Msg {
+						m.client.Send(client.Command{Cmd: "deactivate"})
+						return nil
+					}
+				}
 				m.activating = wt.Path
 				return m, tea.Batch(
 					func() tea.Msg {
