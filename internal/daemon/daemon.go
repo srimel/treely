@@ -96,19 +96,49 @@ func (d *Daemon) stopProcess() {
 }
 
 func (d *Daemon) discoverWorktrees() []Worktree {
-	out, err := exec.Command("git", "-C", d.cfg.ProjectPath, "worktree", "list", "--porcelain").Output()
+	gitRoot := findGitRoot(d.cfg.ProjectPath)
+	out, err := exec.Command("git", "-C", gitRoot, "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil
 	}
 	return parseWorktrees(string(out), d.cfg.ProjectPath)
 }
 
+// findGitRoot returns path if it is a git repo, otherwise searches one level
+// of subdirectories — handles the bare-repo-plus-linked-worktrees layout where
+// the user points treely at the parent directory (e.g. ~/Source/my-app) rather
+// than the bare repo itself (e.g. ~/Source/my-app/my-app.git).
+func findGitRoot(path string) string {
+	if isGitRepo(path) {
+		return path
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return path
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub := filepath.Join(path, e.Name())
+		if isGitRepo(sub) {
+			return sub
+		}
+	}
+	return path
+}
+
+func isGitRepo(path string) bool {
+	return exec.Command("git", "-C", path, "rev-parse", "--git-dir").Run() == nil
+}
+
 func parseWorktrees(output, projectPath string) []Worktree {
 	var result []Worktree
 	var current Worktree
+	bare := false
 	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "worktree ") {
-			if current.Path != "" {
+			if current.Path != "" && !bare {
 				result = append(result, current)
 			}
 			path := strings.TrimPrefix(line, "worktree ")
@@ -117,9 +147,12 @@ func parseWorktrees(output, projectPath string) []Worktree {
 				name = filepath.Base(projectPath)
 			}
 			current = Worktree{Path: path, Name: name, Status: "inactive"}
+			bare = false
+		} else if line == "bare" {
+			bare = true
 		}
 	}
-	if current.Path != "" {
+	if current.Path != "" && !bare {
 		result = append(result, current)
 	}
 	return result

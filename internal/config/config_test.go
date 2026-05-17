@@ -3,8 +3,70 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"~/Source/my-app", filepath.Join(home, "Source/my-app")},
+		{"~/", home},
+		{"~", home},
+		{"/absolute/path", "/absolute/path"},
+		{"relative/path", "relative/path"},
+		{"~user/path", "~user/path"}, // only leading ~/ is expanded
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := expandHome(tt.input)
+			if got != tt.want {
+				t.Errorf("expandHome(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadExpandsHomeTilde(t *testing.T) {
+	tmpDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	trelyDir := filepath.Join(tmpDir, ".treely")
+	if err := os.MkdirAll(trelyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Save(&Config{
+		ProjectPath:    "~/Source/my-app",
+		StartupCommand: "npm run dev",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.HasPrefix(loaded.ProjectPath, "~") {
+		t.Errorf("Load() did not expand tilde: got %q", loaded.ProjectPath)
+	}
+	want := filepath.Join(tmpDir, "Source/my-app")
+	if loaded.ProjectPath != want {
+		t.Errorf("ProjectPath = %q, want %q", loaded.ProjectPath, want)
+	}
+}
 
 func TestSaveAndLoad(t *testing.T) {
 	// Use a temp directory as the home directory
