@@ -11,13 +11,13 @@ The daemon runs detached and persists between TUI sessions. Logs from the dev se
 ## Installation
 
 ```bash
-go install github.com/yourusername/treely/cmd/treely@latest
+go install github.com/srimel/treely/cmd/treely@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/yourusername/treely
+git clone https://github.com/srimel/treely
 cd treely
 go build ./cmd/treely
 ```
