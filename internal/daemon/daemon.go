@@ -42,10 +42,6 @@ func (d *Daemon) handle(cmd Command) (interface{}, bool) {
 	case "activate":
 		d.activate(cmd.Worktree)
 		return nil, true
-	case "deactivate":
-		d.stopProcess()
-		d.srv.Push(d.listResponse())
-		return nil, true
 	case "stop":
 		d.stopProcess()
 		return nil, false

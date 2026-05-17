@@ -7,14 +7,11 @@ import (
 )
 
 type Process struct {
-	cmd  *exec.Cmd
-	pid  int
-	done chan struct{} // closed when the process exits
+	cmd *exec.Cmd
+	pid int
 }
 
-// StartProcess spawns command in dir and immediately starts a single goroutine
-// that calls cmd.Wait(). All callers (Stop, Wait) block on the done channel so
-// cmd.Wait() is never called more than once.
+// StartProcess spawns cmd in dir, returns the running Process.
 func StartProcess(command, dir string) (*Process, error) {
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = dir
@@ -23,31 +20,26 @@ func StartProcess(command, dir string) (*Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	p := &Process{cmd: cmd, pid: cmd.Process.Pid, done: make(chan struct{})}
-	go func() {
-		cmd.Wait()
-		close(p.done)
-	}()
-	return p, nil
+	return &Process{cmd: cmd, pid: cmd.Process.Pid}, nil
 }
 
 func (p *Process) Pid() int { return p.pid }
 
-// Wait blocks until the process exits.
-func (p *Process) Wait() {
-	<-p.done
-}
+// Wait waits for the process to exit.
+func (p *Process) Wait() error { return p.cmd.Wait() }
 
-// Stop sends SIGTERM, waits up to 5s for the process to exit, then SIGKILLs.
+// Stop sends SIGTERM, waits 5s, then SIGKILLs.
 func (p *Process) Stop() {
-	if p.cmd.Process == nil {
+	if p.cmd == nil || p.cmd.Process == nil {
 		return
 	}
-	p.cmd.Process.Signal(os.Interrupt)
+	p.cmd.Process.Signal(os.Interrupt) // SIGTERM on unix
+	done := make(chan error, 1)
+	go func() { done <- p.cmd.Wait() }()
 	select {
-	case <-p.done:
+	case <-done:
 	case <-time.After(5 * time.Second):
 		p.cmd.Process.Kill()
-		<-p.done
+		<-done
 	}
 }
