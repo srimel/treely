@@ -1,9 +1,9 @@
 //go:build windows
 
-package main
+package daemon
 
 import "syscall"
 
-func daemonSysProcAttr() *syscall.SysProcAttr {
+func forkSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }
