@@ -79,7 +79,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter", " ":
-			if len(m.worktrees) > 0 {
+			if len(m.worktrees) > 0 && m.activating == "" {
 				wt := m.worktrees[m.cursor]
 				m.activating = wt.Path
 				return m, tea.Batch(
