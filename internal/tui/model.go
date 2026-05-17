@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/srimel/treely/internal/client"
 	"github.com/srimel/treely/internal/config"
 	"github.com/srimel/treely/internal/daemon"
@@ -17,20 +19,25 @@ type errMsg error
 type daemonRestartedMsg struct{ client *client.Client }
 
 type Model struct {
-	cfg       *config.Config
-	client    *client.Client
-	sockPath  string
-	dir       string
-	worktrees []client.Worktree
-	cursor    int
-	width     int
-	height    int
-	status    string
-	err       error
+	cfg        *config.Config
+	client     *client.Client
+	sockPath   string
+	dir        string
+	worktrees  []client.Worktree
+	cursor     int
+	width      int
+	height     int
+	spinner    spinner.Model
+	activating string // path of the worktree currently being activated
+	status     string
+	err        error
 }
 
 func NewModel(cfg *config.Config, c *client.Client, sockPath, dir string) Model {
-	return Model{cfg: cfg, client: c, sockPath: sockPath, dir: dir}
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	return Model{cfg: cfg, client: c, sockPath: sockPath, dir: dir, spinner: s}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -74,10 +81,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter", " ":
 			if len(m.worktrees) > 0 {
 				wt := m.worktrees[m.cursor]
-				return m, func() tea.Msg {
-					m.client.Send(client.Command{Cmd: "activate", Worktree: wt.Path})
-					return nil
-				}
+				m.activating = wt.Path
+				return m, tea.Batch(
+					func() tea.Msg {
+						m.client.Send(client.Command{Cmd: "activate", Worktree: wt.Path})
+						return nil
+					},
+					m.spinner.Tick,
+				)
 			}
 		case "R":
 			m.status = "Restarting daemon..."
@@ -92,6 +103,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 
+	case spinner.TickMsg:
+		if m.activating != "" {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+
 	case daemonRestartedMsg:
 		m.client = msg.client
 		m.status = ""
@@ -104,6 +122,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case eventMsg:
+		m.activating = ""
 		m.worktrees = msg.Worktrees
 		return m, waitForEvent(m.client)
 
@@ -159,15 +178,18 @@ func (m Model) View() string {
 	} else {
 		for i, wt := range m.worktrees {
 			var line string
-			if wt.Status == "active" {
+			switch {
+			case m.activating == wt.Path:
+				spin := m.spinner.View()
+				name := fmt.Sprintf("%-30s", wt.Name)
+				line = fmt.Sprintf("  %s %s %s", spin, name, spinnerStyle.Render("activating"))
+			case wt.Status == "active":
 				dot := activeStyle.Render("●")
-				status := activeStyle.Render("active")
-				line = fmt.Sprintf("  %s %-30s %s", dot, wt.Name, status)
-			} else {
+				line = fmt.Sprintf("  %s %-30s %s", dot, wt.Name, activeStyle.Render("active"))
+			default:
 				dot := inactiveStyle.Render("○")
 				name := inactiveStyle.Render(fmt.Sprintf("%-30s", wt.Name))
-				status := inactiveStyle.Render("inactive")
-				line = fmt.Sprintf("  %s %s %s", dot, name, status)
+				line = fmt.Sprintf("  %s %s %s", dot, name, inactiveStyle.Render("inactive"))
 			}
 			if i == m.cursor {
 				line = cursorStyle.Render(line)
