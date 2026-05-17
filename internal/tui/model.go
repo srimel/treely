@@ -189,22 +189,23 @@ func (m Model) View() string {
 		sb.WriteString(fmt.Sprintf("  %s\n", m.status))
 	} else {
 		for i, wt := range m.worktrees {
+			cursor := "  "
+			if i == m.cursor {
+				cursor = cursorStyle.Render("▶ ")
+			}
 			var line string
 			switch {
 			case m.activating == wt.Path:
 				spin := m.spinner.View()
 				name := fmt.Sprintf("%-30s", wt.Name)
-				line = fmt.Sprintf("  %s %s %s", spin, name, spinnerStyle.Render("activating"))
+				line = fmt.Sprintf("%s%s %s %s", cursor, spin, name, spinnerStyle.Render("activating"))
 			case wt.Status == "active":
 				dot := activeStyle.Render("●")
-				line = fmt.Sprintf("  %s %-30s %s", dot, wt.Name, activeStyle.Render("active"))
+				line = fmt.Sprintf("%s%s %-30s %s", cursor, dot, wt.Name, activeStyle.Render("active"))
 			default:
 				dot := inactiveStyle.Render("○")
 				name := inactiveStyle.Render(fmt.Sprintf("%-30s", wt.Name))
-				line = fmt.Sprintf("  %s %s %s", dot, name, inactiveStyle.Render("inactive"))
-			}
-			if i == m.cursor {
-				line = cursorStyle.Render(line)
+				line = fmt.Sprintf("%s%s %s %s", cursor, dot, name, inactiveStyle.Render("inactive"))
 			}
 			sb.WriteString(line)
 			sb.WriteString("\n")

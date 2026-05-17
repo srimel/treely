@@ -14,7 +14,8 @@ var (
 			Foreground(lipgloss.Color("240")) // dim
 
 	cursorStyle = lipgloss.NewStyle().
-			Reverse(true)
+			Foreground(lipgloss.Color("205")).
+			Bold(true)
 
 	borderStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
