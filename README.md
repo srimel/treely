@@ -14,6 +14,8 @@ The daemon runs detached and persists between TUI sessions. Logs from the dev se
 go install github.com/srimel/treely/cmd/treely@latest
 ```
 
+> **Note:** The binary is placed in `~/go/bin`. If `treely` isn't found after installing, add `export PATH="$PATH:$(go env GOPATH)/bin"` to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.) and restart your terminal.
+
 Or download a pre-built binary from the [Releases page](https://github.com/srimel/treely/releases), extract the archive for your platform, and move the binary to a directory on your `PATH`:
 
 ```bash
