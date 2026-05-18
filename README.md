@@ -40,6 +40,21 @@ On first run, a setup wizard prompts for your project path and the startup comma
 | `enter` / `space` | Activate worktree |
 | `q` / `ctrl+c` | Quit |
 
+## Development
+
+```bash
+go build ./...          # build all packages
+go run ./cmd/treely     # run without building
+go test ./...           # run all tests
+go vet ./...            # static analysis
+```
+
+To install locally (macOS/Linux):
+
+```bash
+./scripts/install.sh
+```
+
 ## Requirements
 
 - Go 1.21+
