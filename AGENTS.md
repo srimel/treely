@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Treely
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to agents when working with code in this repository.
 
 ## Commands
 
@@ -49,12 +49,12 @@ When the child dev server exits for any reason, the goroutine in `daemon.activat
 
 ### Files at `~/.treely/`
 
-| File | Owner |
-|------|-------|
+| File          | Owner                                        |
+| ------------- | -------------------------------------------- |
 | `config.yaml` | TUI (written once by wizard, read by daemon) |
-| `state.yaml` | Daemon (active worktree path + PID) |
-| `daemon.sock` | Daemon (deleted on clean exit) |
-| `daemon.log` | Daemon stdout/stderr |
+| `state.yaml`  | Daemon (active worktree path + PID)          |
+| `daemon.sock` | Daemon (deleted on clean exit)               |
+| `daemon.log`  | Daemon stdout/stderr                         |
 
 ### `-p` flag
 
