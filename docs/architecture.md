@@ -4,11 +4,14 @@
 
 Treely is a single Go binary that runs in two modes: a **TUI client** (default) and a **daemon** (forked automatically on first run). The TUI is stateless — it delegates all process management and state to the daemon over a Unix socket.
 
-```
-treely (TUI)  ──── Unix socket (~/.treely/daemon.sock) ────  treely --daemon
-                        newline-delimited JSON                       │
-                                                              child dev server
-                                                              (sh -c <startup_command>)
+```mermaid
+flowchart LR
+    TUI["treely (TUI)"]
+    Daemon["treely --daemon"]
+    Child["child dev server\n(sh -c startup_command)"]
+
+    TUI <-->|"Unix socket · newline-delimited JSON\n~/.treely/daemon.sock"| Daemon
+    Daemon --> Child
 ```
 
 ---
@@ -42,9 +45,26 @@ treely/
 
 ### Startup
 
-1. `main.go` calls `config.Load()`. If config is missing, the wizard runs as a separate `tea.Program`. After `p.Run()`, the final model is type-asserted to `tui.WizardModel` and `wz.Result` is read — the only way wizard output crosses back to `main`.
-2. `ensureDaemon()` tries to connect to `~/.treely/daemon.sock`. If unreachable, it forks `self --daemon` in a new session (detached). The TUI polls for the socket to appear (up to 5 seconds).
-3. The TUI connects to the socket, creates a `client.Client`, and launches a `tea.Program`.
+```mermaid
+sequenceDiagram
+    participant main
+    participant wizard as tui.WizardModel
+    participant daemon as treely --daemon
+    participant tui as tea.Program (TUI)
+
+    main->>main: config.Load()
+    alt config missing
+        main->>wizard: tea.Program.Run()
+        wizard-->>main: wz.Result
+    end
+    main->>main: ensureDaemon()
+    alt socket unreachable
+        main->>daemon: fork self --daemon (new session)
+        main->>main: poll for socket (up to 5s)
+    end
+    main->>daemon: connect via Unix socket
+    main->>tui: tea.Program.Run()
+```
 
 ### Daemon
 
@@ -55,10 +75,15 @@ treely/
 
 ### Child Process
 
-- Spawned as `sh -c <startup_command>` in the worktree directory.
-- stdout/stderr go to `~/.treely/daemon.log`.
-- Shutdown: SIGTERM → 5-second grace period → SIGKILL.
-- A goroutine blocks on `proc.Wait()`. When the child exits (crash or clean), the daemon nils `d.proc`, clears `state.yaml`, and pushes a `state_changed` event.
+```mermaid
+stateDiagram-v2
+    [*] --> Running: activate (sh -c startup_command)
+    Running --> Stopping: deactivate / SIGTERM
+    Stopping --> Stopped: graceful exit
+    Stopping --> Stopped: SIGKILL after 5s grace period
+    Running --> Stopped: crash (proc.Wait() returns)
+    Stopped --> [*]: nil d.proc · clear state.yaml · push state_changed
+```
 
 ---
 
@@ -93,6 +118,17 @@ Transport: Unix domain socket, newline-delimited JSON.
 ## TUI Event Loop
 
 `tui.Model` is a standard Bubble Tea model (`Init`, `Update`, `View`).
+
+```mermaid
+flowchart TD
+    Init["Init()"] --> sendList["sendList: send 'list' cmd"]
+    Init --> waitForEvent["waitForEvent: block on client.Events"]
+    waitForEvent --> eventMsg["eventMsg received"]
+    eventMsg --> refresh["Update: refresh worktree list"]
+    refresh --> waitForEvent
+    waitForEvent --> errMsg["errMsg: client disconnect"]
+    errMsg --> quit["display error and quit"]
+```
 
 - `Init()` returns two concurrent commands: `sendList` (sends `"list"` and returns nil) and `waitForEvent` (blocks on `<-client.Events`).
 - `Update(eventMsg)` refreshes the worktree list and re-arms `waitForEvent`, creating a continuous event loop.
