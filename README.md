@@ -47,6 +47,8 @@ On first run, a setup wizard prompts for your project path and the startup comma
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
 | `enter` / `space` | Activate worktree |
+| `R` | Restart daemon |
+| `K` | Kill daemon and quit |
 | `q` / `ctrl+c` | Quit |
 
 ## Development
