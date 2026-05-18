@@ -14,6 +14,13 @@ The daemon runs detached and persists between TUI sessions. Logs from the dev se
 go install github.com/srimel/treely/cmd/treely@latest
 ```
 
+Or download a pre-built binary from the [Releases page](https://github.com/srimel/treely/releases), extract the archive for your platform, and move the binary to a directory on your `PATH`:
+
+```bash
+tar -xzf treely_*_linux_amd64.tar.gz
+mv treely /usr/local/bin/
+```
+
 Or build from source:
 
 ```bash
