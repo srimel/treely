@@ -31,6 +31,28 @@ cd treely
 go build ./cmd/treely
 ```
 
+## Uninstalling
+
+If you installed via `go install`, the binary lives in `$(go env GOPATH)/bin` (usually `~/go/bin`).
+
+1. Stop the daemon and dev server. From inside the TUI press `K` (shift+k), or run:
+
+   ```bash
+   pkill -f 'treely --daemon'
+   ```
+
+2. Remove the binary:
+
+   ```bash
+   rm "$(go env GOPATH)/bin/treely"
+   ```
+
+3. Remove Treely's data directory (config, state, logs, socket):
+
+   ```bash
+   rm -rf ~/.treely
+   ```
+
 ## Usage
 
 ```bash
