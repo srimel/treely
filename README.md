@@ -1,12 +1,10 @@
 # Treely
 
-A terminal UI for managing dev server processes between worktrees of a single project - all from one place. 
-
-Coming soon - support for multiple projects!
+A terminal UI for managing dev server processes between worktrees of a single project - all from one place.
 
 ## How it works
 
-Running `treely` starts a TUI listing your git worktrees. Selecting one activates it: a background daemon starts your configured dev server in that worktree's directory. Switching worktrees stops the old server and starts a new one.
+Running `treely` starts a TUI listing your git worktrees. Selecting one activates it: a background daemon starts your configured dev server in the worktree directory. Switching worktrees stops the old server and starts a new one.
 
 The daemon runs detached and persists between TUI sessions. Logs from the dev server go to `~/.treely/daemon.log`.
 
@@ -40,7 +38,17 @@ treely              # launch the TUI
 treely -p /path     # override project path for this session
 ```
 
-On first run, a setup wizard prompts for your project path and the startup command to run (e.g. `npm run dev`).
+On first run, a setup wizard prompts for your project path and the startup command to run (e.g. `npm run dev`). This configures a single project — the one you'll use most often.
+
+**Using a different project:**
+
+Treely stores one project in its config, but you can point it at any project for a session using `-p`:
+
+```bash
+treely -p ~/Source/other-project
+```
+
+This does not change your saved config — the next plain `treely` invocation will still use your default project.
 
 **Keys:**
 
@@ -50,10 +58,12 @@ On first run, a setup wizard prompts for your project path and the startup comma
 | `↓` / `j` | Move down |
 | `enter` / `space` | Activate worktree |
 | `R` | Restart daemon |
-| `K` | Kill daemon and quit |
-| `q` / `ctrl+c` | Quit |
+| `q` / `ctrl+c` | Quit TUI (daemon and dev server keep running) |
+| `K` _(shift+k)_ | Stop dev server, kill daemon, and quit |
 
 ## Development
+
+For contributors building and testing locally:
 
 ```bash
 go build ./...          # build all packages
