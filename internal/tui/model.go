@@ -18,20 +18,31 @@ type eventMsg client.Event
 type errMsg error
 type daemonRestartedMsg struct{ client *client.Client }
 
+type QuitReason int
+
+const (
+	QuitReasonNone QuitReason = iota
+	QuitReasonUser
+	QuitReasonKillDaemon
+	QuitReasonError
+)
+
 type Model struct {
-	cfg        *config.Config
-	client     *client.Client
-	sockPath   string
-	dir        string
-	debug      bool
-	worktrees  []client.Worktree
-	cursor     int
-	width      int
-	height     int
-	spinner    spinner.Model
-	activating string // path of the worktree currently being activated
-	status     string
-	err        error
+	cfg                *config.Config
+	client             *client.Client
+	sockPath           string
+	dir                string
+	debug              bool
+	worktrees          []client.Worktree
+	cursor             int
+	width              int
+	height             int
+	spinner            spinner.Model
+	activating         string // path of the worktree currently being activated
+	status             string
+	err                error
+	QuitReason         QuitReason
+	ActiveWorktreeName string
 }
 
 func NewModel(cfg *config.Config, c *client.Client, sockPath, dir string, debug bool) Model {
@@ -70,6 +81,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
+			m.QuitReason = QuitReasonUser
+			m.ActiveWorktreeName = activeWorktreeName(m.worktrees)
 			return m, tea.Quit
 		case "up", "k":
 			if m.cursor > 0 {
@@ -95,6 +108,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Restarting daemon..."
 			return m, m.restartDaemonCmd()
 		case "K":
+			m.QuitReason = QuitReasonKillDaemon
+			m.ActiveWorktreeName = activeWorktreeName(m.worktrees)
 			return m, tea.Batch(
 				func() tea.Msg {
 					m.client.Send(client.Command{Cmd: "stop"})
@@ -129,6 +144,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.err = msg
+		m.QuitReason = QuitReasonError
 		return m, tea.Quit
 	}
 	return m, nil
@@ -158,6 +174,15 @@ func (m Model) restartDaemonCmd() tea.Cmd {
 		}
 		return daemonRestartedMsg{client: c}
 	}
+}
+
+func activeWorktreeName(worktrees []client.Worktree) string {
+	for _, wt := range worktrees {
+		if wt.Status == "active" {
+			return wt.Name
+		}
+	}
+	return ""
 }
 
 func (m Model) View() string {

@@ -88,9 +88,56 @@ func main() {
 
 	m := tui.NewModel(cfg, c, sockPath, dir, *debugMode)
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	final, err := p.Run()
+	if err != nil {
 		log.Fatal(err)
 	}
+	if fm, ok := final.(tui.Model); ok {
+		printExitFeedback(fm, sockPath, dir)
+	}
+}
+
+func printExitFeedback(m tui.Model, sockPath, dir string) {
+	switch m.QuitReason {
+	case tui.QuitReasonUser:
+		pid, _ := daemon.ReadPIDFile(dir)
+		fmt.Println("Exited Treely.")
+		if pid > 0 {
+			fmt.Printf("Daemon still running (PID %d).\n", pid)
+		} else {
+			fmt.Println("Daemon is not running.")
+		}
+		if m.ActiveWorktreeName != "" {
+			fmt.Printf("Dev server still running for %s.\n", m.ActiveWorktreeName)
+		} else {
+			fmt.Println("No active worktree.")
+		}
+
+	case tui.QuitReasonKillDaemon:
+		stopped := waitForSocketGone(sockPath, 3*time.Second)
+		if !stopped {
+			fmt.Println("Sent stop signal to daemon, but it did not exit within 3s.")
+			fmt.Println("Check `~/.treely/daemon.log` or run `treely --restart-daemon`.")
+			return
+		}
+		fmt.Println("Stopped Treely daemon.")
+		if m.ActiveWorktreeName != "" {
+			fmt.Printf("Dev server for %s stopped.\n", m.ActiveWorktreeName)
+		} else {
+			fmt.Println("No worktree was active.")
+		}
+	}
+}
+
+func waitForSocketGone(sockPath string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
 
 // stopDaemon sends a stop command to a running daemon and waits for it to exit.
