@@ -6,12 +6,15 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/srimel/treely/internal/config"
 )
 
 type WizardModel struct {
 	inputs  []textinput.Model
 	focused int
+	width   int
+	height  int
 	err     error
 	Result  *config.Config
 }
@@ -38,6 +41,9 @@ func (m WizardModel) Init() tea.Cmd {
 
 func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -79,6 +85,16 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m WizardModel) View() string {
+	width := m.width
+	if width == 0 {
+		width = 80
+	}
+	const margin = 2
+	contentWidth := width - margin*2 - 4
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Treely Setup"))
 	sb.WriteString("\n\n")
@@ -90,5 +106,7 @@ func (m WizardModel) View() string {
 	}
 
 	sb.WriteString(footerStyle.Render("tab to switch fields · enter to confirm"))
-	return borderStyle.Render(sb.String())
+	return lipgloss.NewStyle().MarginLeft(margin).Render(
+		borderStyle.Width(contentWidth).Render(sb.String()),
+	)
 }
