@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -14,6 +15,13 @@ func Fork(sockPath, dir string, debug bool) error {
 	if conn, err := net.DialTimeout("unix", sockPath, time.Second); err == nil {
 		conn.Close()
 		return nil
+	}
+
+	// Socket is stale or absent. Terminate any predecessor daemon that may still
+	// be alive (e.g. it lost its socket but not its PID file) before spawning a
+	// replacement. Best-effort: log and continue if it fails.
+	if err := TerminateExistingDaemon(dir, 5*time.Second); err != nil {
+		slog.Warn("could not terminate existing daemon", "err", err)
 	}
 
 	logPath := filepath.Join(dir, "daemon.log")

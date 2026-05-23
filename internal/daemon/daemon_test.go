@@ -134,8 +134,9 @@ func waitForSocket(t *testing.T, sockPath string) {
 func TestDaemonListCommand(t *testing.T) {
 	setupConfig(t)
 
-	sockPath := filepath.Join(t.TempDir(), "daemon_test.sock")
-	go func() { _ = Run(sockPath, false) }()
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "daemon_test.sock")
+	go func() { _ = Run(sockPath, dir, false) }()
 	waitForSocket(t, sockPath)
 
 	conn, err := net.Dial("unix", sockPath)
@@ -177,8 +178,9 @@ func TestDaemonListCommand(t *testing.T) {
 func TestRunDebugMode(t *testing.T) {
 	setupConfig(t)
 
-	sockPath := filepath.Join(t.TempDir(), "daemon_debug_test.sock")
-	go func() { _ = Run(sockPath, true) }()
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "daemon_debug_test.sock")
+	go func() { _ = Run(sockPath, dir, true) }()
 	waitForSocket(t, sockPath)
 
 	conn, err := net.Dial("unix", sockPath)
@@ -209,4 +211,46 @@ func TestRunDebugMode(t *testing.T) {
 
 	// Clean up the daemon goroutine.
 	conn.Write([]byte("{\"cmd\":\"stop\"}\n"))
+}
+
+// TestRunStopCommandCleansUp verifies that the "stop" command triggers the
+// unified cleanup path: stopProcess, srv.Close, socket removal, PID file removal.
+func TestRunStopCommandCleansUp(t *testing.T) {
+	setupConfig(t)
+
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "d.sock") // short name avoids macOS 104-byte socket path limit
+	pidPath := filepath.Join(dir, "daemon.pid")
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- Run(sockPath, dir, false) }()
+	waitForSocket(t, sockPath)
+
+	// Verify PID file was written.
+	if _, err := os.Stat(pidPath); err != nil {
+		t.Fatalf("PID file should exist after daemon start: %v", err)
+	}
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	conn.Write([]byte("{\"cmd\":\"stop\"}\n"))
+	conn.Close()
+
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Errorf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not exit after stop command")
+	}
+
+	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
+		t.Error("socket should be removed after stop command")
+	}
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Error("PID file should be removed after stop command")
+	}
 }

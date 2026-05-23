@@ -30,7 +30,7 @@ func main() {
 	sockPath := filepath.Join(dir, "daemon.sock")
 
 	if *daemonMode {
-		if err := daemon.Run(sockPath, *debugMode); err != nil {
+		if err := daemon.Run(sockPath, dir, *debugMode); err != nil {
 			log.Fatal(err)
 		}
 		return

@@ -1,11 +1,15 @@
 package daemon
 
 import (
+	"errors"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/srimel/treely/internal/config"
 	"github.com/srimel/treely/internal/state"
@@ -16,30 +20,88 @@ type Daemon struct {
 	srv      *Server
 	proc     *Process
 	sockPath string
+	shutdown chan struct{}
+	stopOnce sync.Once
 }
 
-func Run(sockPath string, debug bool) error {
+// Run starts the daemon, binding to sockPath and writing a PID file to dir.
+// It returns after a clean shutdown (signal or stop command) or a fatal error.
+func Run(sockPath, dir string, debug bool) error {
 	if debug {
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	} else {
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
+
+	// Belt-and-braces: terminate any predecessor that didn't clean up its own
+	// PID file (e.g. it was SIGKILLed or crashed).
+	if err := TerminateExistingDaemon(dir, 5*time.Second); err != nil {
+		slog.Warn("predecessor daemon may still be alive; proceeding", "err", err)
+	}
+
 	srv, err := NewServer(sockPath)
 	if err != nil {
 		return err
 	}
-	defer func() {
+
+	if err := WritePIDFile(dir); err != nil {
 		srv.Close()
 		os.Remove(sockPath)
-	}()
+		return err
+	}
+
+	sigCh, stopSig := notifyShutdown()
+	defer stopSig()
 
 	slog.Info("daemon started", "sock", sockPath)
-	d := &Daemon{cfg: cfg, srv: srv, sockPath: sockPath}
-	return srv.Accept(d.handle)
+	d := &Daemon{
+		cfg:      cfg,
+		srv:      srv,
+		sockPath: sockPath,
+		shutdown: make(chan struct{}),
+	}
+
+	acceptDone := make(chan error, 1)
+	go func() {
+		acceptDone <- srv.Accept(d.handle)
+	}()
+
+	var runErr error
+	acceptExited := false
+	select {
+	case <-sigCh:
+		slog.Info("daemon shutting down", "reason", "signal")
+	case <-d.shutdown:
+		slog.Info("daemon shutting down", "reason", "stop command")
+	case runErr = <-acceptDone:
+		acceptExited = true
+		if errors.Is(runErr, net.ErrClosed) {
+			runErr = nil
+		} else if runErr != nil {
+			slog.Error("accept error", "err", runErr)
+		}
+	}
+
+	// Stop child before closing the listener so it doesn't hold ports across
+	// the next worktree activation.
+	d.stopProcess()
+	srv.Close()
+	os.Remove(sockPath)
+	RemovePIDFile(dir)
+
+	if !acceptExited {
+		select {
+		case <-acceptDone:
+		case <-time.After(time.Second):
+		}
+	}
+
+	return runErr
 }
 
 func (d *Daemon) handle(cmd Command) (interface{}, bool) {
@@ -56,6 +118,7 @@ func (d *Daemon) handle(cmd Command) (interface{}, bool) {
 		return nil, true
 	case "stop":
 		d.stopProcess()
+		d.stopOnce.Do(func() { close(d.shutdown) })
 		return nil, false
 	}
 	return nil, true
@@ -90,7 +153,6 @@ func (d *Daemon) activate(worktreePath string) {
 	// Monitor for crash
 	go func() {
 		proc.Wait()
-		// Process exited (crash or normal stop)
 		if d.proc == proc {
 			slog.Info("process exited", "path", worktreePath)
 			d.proc = nil
