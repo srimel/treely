@@ -185,6 +185,42 @@ func activeWorktreeName(worktrees []client.Worktree) string {
 	return ""
 }
 
+// renderRow lays out one worktree row with the status flush against the right
+// edge: cursor + marker + " " + name + gap + status. Long names are truncated
+// with "…" so a 1-cell gap before status is preserved.
+func renderRow(cursor, marker, name, status string, rowWidth int, nameInactive bool) string {
+	cursorW := lipgloss.Width(cursor)
+	markerW := lipgloss.Width(marker)
+	statusW := lipgloss.Width(status)
+
+	fixed := cursorW + markerW + 1 + statusW
+
+	runes := []rune(name)
+	if len(runes)+fixed > rowWidth-1 {
+		target := rowWidth - fixed - 1
+		if target < 1 {
+			target = 1
+		}
+		if target == 1 {
+			name = "…"
+		} else {
+			name = string(runes[:target-1]) + "…"
+		}
+	}
+
+	styledName := name
+	if nameInactive {
+		styledName = inactiveStyle.Render(name)
+	}
+
+	gap := rowWidth - cursorW - markerW - 1 - lipgloss.Width(styledName) - statusW
+	if gap < 1 {
+		gap = 1
+	}
+
+	return cursor + marker + " " + styledName + strings.Repeat(" ", gap) + status
+}
+
 func (m Model) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n", m.err)
@@ -222,16 +258,11 @@ func (m Model) View() string {
 			var line string
 			switch {
 			case m.activating == wt.Path:
-				spin := m.spinner.View()
-				name := fmt.Sprintf("%-30s", wt.Name)
-				line = fmt.Sprintf("%s%s %s %s", cursor, spin, name, spinnerStyle.Render("activating"))
+				line = renderRow(cursor, m.spinner.View(), wt.Name, spinnerStyle.Render("activating"), contentWidth, false)
 			case wt.Status == "active":
-				dot := activeStyle.Render("●")
-				line = fmt.Sprintf("%s%s %-30s %s", cursor, dot, wt.Name, activeStyle.Render("active"))
+				line = renderRow(cursor, activeStyle.Render("●"), wt.Name, activeStyle.Render("active"), contentWidth, false)
 			default:
-				dot := inactiveStyle.Render("○")
-				name := inactiveStyle.Render(fmt.Sprintf("%-30s", wt.Name))
-				line = fmt.Sprintf("%s%s %s %s", cursor, dot, name, inactiveStyle.Render("inactive"))
+				line = renderRow(cursor, inactiveStyle.Render("○"), wt.Name, inactiveStyle.Render("inactive"), contentWidth, true)
 			}
 			sb.WriteString(line)
 			sb.WriteString("\n")
