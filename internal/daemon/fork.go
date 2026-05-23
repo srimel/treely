@@ -10,7 +10,7 @@ import (
 )
 
 // Fork starts a new daemon process if one is not already running on sockPath.
-func Fork(sockPath, dir string) error {
+func Fork(sockPath, dir string, debug bool) error {
 	if conn, err := net.DialTimeout("unix", sockPath, time.Second); err == nil {
 		conn.Close()
 		return nil
@@ -27,7 +27,11 @@ func Fork(sockPath, dir string) error {
 		return err
 	}
 
-	cmd := exec.Command(self, "--daemon")
+	args := []string{"--daemon"}
+	if debug {
+		args = append(args, "--debug")
+	}
+	cmd := exec.Command(self, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = forkSysProcAttr()

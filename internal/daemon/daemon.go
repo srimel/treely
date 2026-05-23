@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,12 @@ type Daemon struct {
 	sockPath string
 }
 
-func Run(sockPath string) error {
+func Run(sockPath string, debug bool) error {
+	if debug {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	} else {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -31,11 +37,17 @@ func Run(sockPath string) error {
 		os.Remove(sockPath)
 	}()
 
+	slog.Info("daemon started", "sock", sockPath)
 	d := &Daemon{cfg: cfg, srv: srv, sockPath: sockPath}
 	return srv.Accept(d.handle)
 }
 
 func (d *Daemon) handle(cmd Command) (interface{}, bool) {
+	if cmd.Worktree != "" {
+		slog.Debug("command received", "cmd", cmd.Cmd, "worktree", cmd.Worktree)
+	} else {
+		slog.Debug("command received", "cmd", cmd.Cmd)
+	}
 	switch cmd.Cmd {
 	case "list":
 		return d.listResponse(), true
@@ -64,10 +76,13 @@ func (d *Daemon) listResponse() Event {
 
 func (d *Daemon) activate(worktreePath string) {
 	d.stopProcess()
+	slog.Info("activating worktree", "path", worktreePath)
 	proc, err := StartProcess(d.cfg.StartupCommand, worktreePath)
 	if err != nil {
+		slog.Error("process start failed", "path", worktreePath, "err", err)
 		return
 	}
+	slog.Info("process started", "pid", proc.Pid())
 	d.proc = proc
 	st := &state.State{ActiveWorktree: worktreePath, PID: proc.Pid()}
 	state.Save(st)
@@ -77,6 +92,7 @@ func (d *Daemon) activate(worktreePath string) {
 		proc.Wait()
 		// Process exited (crash or normal stop)
 		if d.proc == proc {
+			slog.Info("process exited", "path", worktreePath)
 			d.proc = nil
 			st := &state.State{}
 			state.Save(st)
@@ -89,6 +105,7 @@ func (d *Daemon) activate(worktreePath string) {
 
 func (d *Daemon) stopProcess() {
 	if d.proc != nil {
+		slog.Info("stopping process")
 		d.proc.Stop()
 		d.proc = nil
 		state.Save(&state.State{})
@@ -99,9 +116,12 @@ func (d *Daemon) discoverWorktrees() []Worktree {
 	gitRoot := findGitRoot(d.cfg.ProjectPath)
 	out, err := exec.Command("git", "-C", gitRoot, "worktree", "list", "--porcelain").Output()
 	if err != nil {
+		slog.Warn("git worktree list failed", "err", err)
 		return nil
 	}
-	return parseWorktrees(string(out), d.cfg.ProjectPath)
+	result := parseWorktrees(string(out), d.cfg.ProjectPath)
+	slog.Debug("discovered worktrees", "count", len(result))
+	return result
 }
 
 // findGitRoot returns path if it is a git repo, otherwise searches one level

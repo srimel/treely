@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -62,6 +63,7 @@ func (s *Server) Accept(handler func(cmd Command) (interface{}, bool)) error {
 		}
 		s.client = conn
 		s.mu.Unlock()
+		slog.Debug("client connected")
 		go s.handleConn(conn, handler)
 	}
 }
@@ -74,6 +76,7 @@ func (s *Server) handleConn(conn net.Conn, handler func(cmd Command) (interface{
 			s.client = nil
 		}
 		s.mu.Unlock()
+		slog.Debug("client disconnected")
 	}()
 	scanner := bufio.NewScanner(conn)
 	enc := json.NewEncoder(conn)
@@ -100,5 +103,6 @@ func (s *Server) Push(evt Event) {
 	if conn == nil {
 		return
 	}
+	slog.Debug("pushing event", "event", evt.Event, "worktrees", len(evt.Worktrees))
 	json.NewEncoder(conn).Encode(evt)
 }

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 func main() {
 	daemonMode := flag.Bool("daemon", false, "run as daemon")
+	debugMode := flag.Bool("debug", false, "enable debug logging to ~/.treely/daemon.log")
 	projectOverride := flag.String("p", "", "project path override (session only)")
 	restartDaemon := flag.Bool("restart-daemon", false, "restart the background daemon")
 	flag.Parse()
@@ -28,15 +30,26 @@ func main() {
 	sockPath := filepath.Join(dir, "daemon.sock")
 
 	if *daemonMode {
-		if err := daemon.Run(sockPath); err != nil {
+		if err := daemon.Run(sockPath, *debugMode); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
 
+	if *debugMode {
+		logPath := filepath.Join(dir, "daemon.log")
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not open log file: %v\n", err)
+		} else {
+			defer logFile.Close()
+			slog.SetDefault(slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		}
+	}
+
 	if *restartDaemon {
 		stopDaemon(sockPath)
-		if err := daemon.Fork(sockPath, dir); err != nil {
+		if err := daemon.Fork(sockPath, dir, *debugMode); err != nil {
 			log.Fatalf("failed to start daemon: %v", err)
 		}
 		fmt.Println("Daemon restarted.")
@@ -63,7 +76,7 @@ func main() {
 		cfg.ProjectPath = *projectOverride
 	}
 
-	if err := daemon.Fork(sockPath, dir); err != nil {
+	if err := daemon.Fork(sockPath, dir, *debugMode); err != nil {
 		log.Fatal(err)
 	}
 
@@ -73,7 +86,7 @@ func main() {
 	}
 	defer c.Close()
 
-	m := tui.NewModel(cfg, c, sockPath, dir)
+	m := tui.NewModel(cfg, c, sockPath, dir, *debugMode)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)

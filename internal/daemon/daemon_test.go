@@ -90,13 +90,13 @@ func TestFindGitRoot_NoGitRepo(t *testing.T) {
 	}
 }
 
-func TestDaemonListCommand(t *testing.T) {
+func setupConfig(t *testing.T) {
+	t.Helper()
 	cfgDir, err := config.Dir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfgPath := filepath.Join(cfgDir, "config.yaml")
-
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -117,21 +117,26 @@ func TestDaemonListCommand(t *testing.T) {
 		}
 		t.Cleanup(func() { os.Remove(cfgPath) })
 	}
+}
 
-	sockPath := filepath.Join(t.TempDir(), "daemon_test.sock")
-
-	go func() { _ = Run(sockPath) }()
-
+func waitForSocket(t *testing.T, sockPath string) {
+	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(sockPath); err == nil {
-			break
+			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if _, err := os.Stat(sockPath); err != nil {
-		t.Fatalf("daemon socket never appeared: %v", err)
-	}
+	t.Fatalf("daemon socket never appeared at %s", sockPath)
+}
+
+func TestDaemonListCommand(t *testing.T) {
+	setupConfig(t)
+
+	sockPath := filepath.Join(t.TempDir(), "daemon_test.sock")
+	go func() { _ = Run(sockPath, false) }()
+	waitForSocket(t, sockPath)
 
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -167,4 +172,41 @@ func TestDaemonListCommand(t *testing.T) {
 	if evt.Worktrees == nil {
 		t.Error("worktrees is nil, expected non-nil array")
 	}
+}
+
+func TestRunDebugMode(t *testing.T) {
+	setupConfig(t)
+
+	sockPath := filepath.Join(t.TempDir(), "daemon_debug_test.sock")
+	go func() { _ = Run(sockPath, true) }()
+	waitForSocket(t, sockPath)
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.Write([]byte("{\"cmd\":\"list\"}\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		t.Fatalf("no response from daemon: %v", scanner.Err())
+	}
+	var evt Event
+	if err := json.Unmarshal(scanner.Bytes(), &evt); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if evt.Event != "state_changed" {
+		t.Errorf("event=%q, want state_changed", evt.Event)
+	}
+	if evt.Worktrees == nil {
+		t.Error("worktrees is nil, expected non-nil array")
+	}
+
+	// Clean up the daemon goroutine.
+	conn.Write([]byte("{\"cmd\":\"stop\"}\n"))
 }

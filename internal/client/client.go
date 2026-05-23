@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"encoding/json"
+	"log/slog"
 	"net"
 )
 
@@ -34,6 +35,7 @@ func Connect(sockPath string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("connected to daemon", "sock", sockPath)
 	c := &Client{
 		conn:    conn,
 		enc:     json.NewEncoder(conn),
@@ -51,11 +53,13 @@ func (c *Client) readLoop() {
 		if err := json.Unmarshal(c.scanner.Bytes(), &evt); err != nil {
 			continue
 		}
+		slog.Debug("received event", "event", evt.Event, "worktrees", len(evt.Worktrees))
 		c.Events <- evt
 	}
 }
 
 func (c *Client) Send(cmd Command) error {
+	slog.Debug("sent command", "cmd", cmd.Cmd)
 	return c.enc.Encode(cmd)
 }
 

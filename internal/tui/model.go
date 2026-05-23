@@ -23,6 +23,7 @@ type Model struct {
 	client     *client.Client
 	sockPath   string
 	dir        string
+	debug      bool
 	worktrees  []client.Worktree
 	cursor     int
 	width      int
@@ -33,11 +34,11 @@ type Model struct {
 	err        error
 }
 
-func NewModel(cfg *config.Config, c *client.Client, sockPath, dir string) Model {
+func NewModel(cfg *config.Config, c *client.Client, sockPath, dir string, debug bool) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	return Model{cfg: cfg, client: c, sockPath: sockPath, dir: dir, spinner: s}
+	return Model{cfg: cfg, client: c, sockPath: sockPath, dir: dir, debug: debug, spinner: s}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -147,7 +148,7 @@ func (m Model) restartDaemonCmd() tea.Cmd {
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		if err := daemon.Fork(m.sockPath, m.dir); err != nil {
+		if err := daemon.Fork(m.sockPath, m.dir, m.debug); err != nil {
 			return errMsg(err)
 		}
 
