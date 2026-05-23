@@ -1,6 +1,8 @@
 # Treely
 
-A terminal UI for managing git worktrees. Switch between worktrees and spin up a dev server in the right directory — all from one place.
+A terminal UI for managing dev server processes between worktrees of a single project - all from one place. 
+
+Coming soon - support for multiple projects!
 
 ## How it works
 
