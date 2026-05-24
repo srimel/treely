@@ -237,7 +237,9 @@ func (m Model) View() string {
 	}
 	const margin = 2
 	// borderStyle has 1px border + 1px padding on each side (4 total overhead).
-	// Target outer border width = terminal width - 2 margins on each side.
+	// contentWidth is the inner row width visible to renderRow. lipgloss's
+	// .Width() includes padding (wraps at Width - padding), so we pass
+	// contentWidth+2 to .Width() so the inner wrap point equals contentWidth.
 	contentWidth := width - margin*2 - 4
 	if contentWidth < 20 {
 		contentWidth = 20
@@ -273,6 +275,6 @@ func (m Model) View() string {
 	sb.WriteString(footerStyle.Render("↑↓/jk navigate · enter/space activate · R restart daemon · K kill daemon · q quit"))
 
 	return lipgloss.NewStyle().MarginLeft(margin).Render(
-		borderStyle.Width(contentWidth).Render(sb.String()),
+		borderStyle.Width(contentWidth + 2).Render(sb.String()),
 	)
 }
