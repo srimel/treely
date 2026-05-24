@@ -25,6 +25,12 @@ var (
 	footerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240"))
 
+	errorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")) // red
+
+	hintStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")) // orange
+
 	spinnerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("214")) // orange — transitioning state
 )
