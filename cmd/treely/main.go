@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"log/slog"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/spf13/pflag"
 	"github.com/srimel/treely/internal/client"
 	"github.com/srimel/treely/internal/config"
 	"github.com/srimel/treely/internal/daemon"
@@ -17,11 +17,12 @@ import (
 )
 
 func main() {
-	daemonMode := flag.Bool("daemon", false, "run as daemon")
-	debugMode := flag.Bool("debug", false, "enable debug logging to ~/.treely/daemon.log")
-	projectOverride := flag.String("p", "", "project path override (session only)")
-	restartDaemon := flag.Bool("restart-daemon", false, "restart the background daemon")
-	flag.Parse()
+	daemonMode := pflag.Bool("daemon", false, "run as daemon")
+	debugMode := pflag.Bool("debug", false, "enable debug logging to ~/.treely/daemon.log")
+	cmdOverride := pflag.StringP("command", "c", "", "startup command override (session only)")
+	restartDaemon := pflag.Bool("restart-daemon", false, "restart the background daemon")
+	pflag.Parse()
+	positionalPath := resolvePositionalPath(pflag.Arg(0))
 
 	dir, err := config.Dir()
 	if err != nil {
@@ -72,9 +73,12 @@ func main() {
 		}
 	}
 
-	if *projectOverride != "" {
-		cfg.ProjectPath = *projectOverride
+	if positionalPath != "" {
+		if _, err := os.Stat(positionalPath); err != nil {
+			log.Fatalf("project path %q: %v", positionalPath, err)
+		}
 	}
+	cfg = resolveConfig(cfg, positionalPath, *cmdOverride)
 
 	if err := daemon.Fork(sockPath, dir, *debugMode); err != nil {
 		log.Fatal(err)
@@ -156,6 +160,47 @@ func stopDaemon(sockPath string) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// resolvePositionalPath resolves the positional project path against the
+// shell's cwd before it crosses the socket. The daemon runs detached with its
+// own cwd, so a relative path like "." or "../foo" would otherwise resolve
+// against the wrong root. Empty input is returned unchanged.
+func resolvePositionalPath(p string) string {
+	return resolvePositionalPathWith(p, os.Getwd)
+}
+
+// resolvePositionalPathWith is the testable inner of resolvePositionalPath:
+// the cwd source is injected so the Getwd-failure fallback can be exercised
+// without actually destroying the test process's cwd.
+func resolvePositionalPathWith(p string, getwd func() (string, error)) string {
+	if p == "" {
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	wd, err := getwd()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(wd, p)
+}
+
+// resolveConfig applies session-only CLI overrides to cfg in memory. It does
+// not touch the on-disk config. Empty strings mean "no override".
+func resolveConfig(cfg *config.Config, positionalPath, cmdOverride string) *config.Config {
+	if cfg == nil {
+		return nil
+	}
+	out := *cfg
+	if positionalPath != "" {
+		out.ProjectPath = positionalPath
+	}
+	if cmdOverride != "" {
+		out.StartupCommand = cmdOverride
+	}
+	return &out
 }
 
 func runWizard() (*config.Config, error) {

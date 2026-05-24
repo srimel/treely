@@ -27,6 +27,13 @@ const (
 	QuitReasonError
 )
 
+type mode int
+
+const (
+	modeNormal mode = iota
+	modeConfirmSwitch
+)
+
 type Model struct {
 	cfg                *config.Config
 	client             *client.Client
@@ -40,6 +47,8 @@ type Model struct {
 	spinner            spinner.Model
 	activating         string // path of the worktree currently being activated
 	status             string
+	mode               mode
+	pendingSwitch      *client.SwitchInfo
 	err                error
 	QuitReason         QuitReason
 	ActiveWorktreeName string
@@ -55,7 +64,11 @@ func NewModel(cfg *config.Config, c *client.Client, sockPath, dir string, debug 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		func() tea.Msg {
-			m.client.Send(client.Command{Cmd: "list"})
+			m.client.Send(client.Command{
+				Cmd:            "set_project",
+				ProjectPath:    m.cfg.ProjectPath,
+				StartupCommand: m.cfg.StartupCommand,
+			})
 			return nil
 		},
 		waitForEvent(m.client),
@@ -79,6 +92,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyMsg:
+		if m.mode == modeConfirmSwitch {
+			switch msg.String() {
+			case "y", "Y":
+				m.mode = modeNormal
+				ps := m.pendingSwitch
+				m.pendingSwitch = nil
+				if ps == nil {
+					return m, nil
+				}
+				return m, func() tea.Msg {
+					m.client.Send(client.Command{
+						Cmd:            "set_project",
+						ProjectPath:    ps.ToProject,
+						StartupCommand: m.cfg.StartupCommand,
+						Force:          true,
+					})
+					return nil
+				}
+			case "n", "N", "q", "ctrl+c":
+				m.QuitReason = QuitReasonUser
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.QuitReason = QuitReasonUser
@@ -106,6 +144,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "R":
 			m.status = "Restarting daemon..."
+			// Drop stale worktrees so the restart message stands alone;
+			// the post-restart set_project response repopulates the list.
+			m.worktrees = nil
+			m.cursor = 0
+			m.activating = ""
 			return m, m.restartDaemonCmd()
 		case "K":
 			m.QuitReason = QuitReasonKillDaemon
@@ -131,15 +174,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		return m, tea.Batch(
 			func() tea.Msg {
-				m.client.Send(client.Command{Cmd: "list"})
+				m.client.Send(client.Command{
+					Cmd:            "set_project",
+					ProjectPath:    m.cfg.ProjectPath,
+					StartupCommand: m.cfg.StartupCommand,
+				})
 				return nil
 			},
 			waitForEvent(m.client),
 		)
 
 	case eventMsg:
+		if msg.ConfirmSwitch != nil {
+			m.mode = modeConfirmSwitch
+			m.pendingSwitch = msg.ConfirmSwitch
+			return m, waitForEvent(m.client)
+		}
 		m.activating = ""
 		m.worktrees = msg.Worktrees
+		m.status = msg.Notice
 		return m, waitForEvent(m.client)
 
 	case errMsg:
@@ -249,26 +302,34 @@ func (m Model) View() string {
 	sb.WriteString(titleStyle.Render(fmt.Sprintf("Treely  %s", projectName)))
 	sb.WriteString("\n\n")
 
+	if m.mode == modeConfirmSwitch {
+		sb.WriteString(renderConfirmSwitch(m.pendingSwitch))
+		sb.WriteString("\n")
+		sb.WriteString(footerStyle.Render("[y] yes, switch    [n] no, quit treely"))
+		return lipgloss.NewStyle().MarginLeft(margin).Render(
+			borderStyle.Width(contentWidth + 2).Render(sb.String()),
+		)
+	}
+
 	if m.status != "" {
-		sb.WriteString(fmt.Sprintf("  %s\n", m.status))
-	} else {
-		for i, wt := range m.worktrees {
-			cursor := "  "
-			if i == m.cursor {
-				cursor = cursorStyle.Render("▶ ")
-			}
-			var line string
-			switch {
-			case m.activating == wt.Path:
-				line = renderRow(cursor, m.spinner.View(), wt.Name, spinnerStyle.Render("activating"), contentWidth, false)
-			case wt.Status == "active":
-				line = renderRow(cursor, activeStyle.Render("●"), wt.Name, activeStyle.Render("active"), contentWidth, false)
-			default:
-				line = renderRow(cursor, inactiveStyle.Render("○"), wt.Name, inactiveStyle.Render("inactive"), contentWidth, true)
-			}
-			sb.WriteString(line)
-			sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("  %s\n\n", m.status))
+	}
+	for i, wt := range m.worktrees {
+		cursor := "  "
+		if i == m.cursor {
+			cursor = cursorStyle.Render("▶ ")
 		}
+		var line string
+		switch {
+		case m.activating == wt.Path:
+			line = renderRow(cursor, m.spinner.View(), wt.Name, spinnerStyle.Render("activating"), contentWidth, false)
+		case wt.Status == "active":
+			line = renderRow(cursor, activeStyle.Render("●"), wt.Name, activeStyle.Render("active"), contentWidth, false)
+		default:
+			line = renderRow(cursor, inactiveStyle.Render("○"), wt.Name, inactiveStyle.Render("inactive"), contentWidth, true)
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
 	}
 
 	sb.WriteString("\n")
@@ -277,4 +338,20 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().MarginLeft(margin).Render(
 		borderStyle.Width(contentWidth + 2).Render(sb.String()),
 	)
+}
+
+func renderConfirmSwitch(si *client.SwitchInfo) string {
+	if si == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("  The daemon is running a dev server for a different project.\n\n")
+	sb.WriteString(fmt.Sprintf("    Project: %s\n", si.FromProject))
+	sb.WriteString(fmt.Sprintf("    Command: %s\n", si.RunningCommand))
+	if si.ActiveWorktree != "" {
+		sb.WriteString(fmt.Sprintf("    Active:  %s\n", si.ActiveWorktree))
+	}
+	sb.WriteString("\n")
+	sb.WriteString(fmt.Sprintf("  Switch to %s and stop this dev server?\n", si.ToProject))
+	return sb.String()
 }

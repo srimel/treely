@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -113,6 +114,8 @@ func (d *Daemon) handle(cmd Command) (interface{}, bool) {
 	switch cmd.Cmd {
 	case "list":
 		return d.listResponse(), true
+	case "set_project":
+		return d.handleSetProject(cmd), true
 	case "activate":
 		d.activate(cmd.Worktree)
 		return nil, true
@@ -122,6 +125,74 @@ func (d *Daemon) handle(cmd Command) (interface{}, bool) {
 		return nil, false
 	}
 	return nil, true
+}
+
+// handleSetProject is the TUI's connect-time handshake. It reconciles the
+// daemon's in-memory cfg with what the TUI was launched with: same project +
+// same command is a no-op; same project + different command hot-updates the
+// startup command without killing the running dev server; a different project
+// either switches (when nothing is running, or when Force is set) or returns a
+// ConfirmSwitch event for the TUI to prompt the user.
+//
+// The daemon's cfg is mutated here at runtime — config.yaml on disk is never
+// touched. Sessions-only overrides are the whole point of this command.
+func (d *Daemon) handleSetProject(cmd Command) Event {
+	// Defense in depth: an empty ProjectPath or StartupCommand from a
+	// malformed message would otherwise blank out d.cfg in the
+	// "different project, no proc" branch below.
+	if cmd.ProjectPath == "" || cmd.StartupCommand == "" {
+		slog.Warn("set_project rejected: empty fields",
+			"project_path", cmd.ProjectPath,
+			"startup_command", cmd.StartupCommand)
+		return d.listResponse()
+	}
+
+	sameProject := cmd.ProjectPath == d.cfg.ProjectPath
+	sameCommand := cmd.StartupCommand == d.cfg.StartupCommand
+
+	if sameProject {
+		if sameCommand {
+			return d.listResponse()
+		}
+		d.cfg.StartupCommand = cmd.StartupCommand
+		return d.listResponseWithNotice("Startup command updated; takes effect on next activation.")
+	}
+
+	// Different project.
+	if d.proc != nil && !cmd.Force {
+		st, _ := state.Load()
+		active := ""
+		if st != nil {
+			active = st.ActiveWorktree
+		}
+		evt := d.listResponse()
+		evt.ConfirmSwitch = &SwitchInfo{
+			FromProject:    d.cfg.ProjectPath,
+			ToProject:      cmd.ProjectPath,
+			RunningCommand: d.cfg.StartupCommand,
+			ActiveWorktree: active,
+		}
+		return evt
+	}
+
+	// Either no proc, or Force=true. stopProcess is a no-op when d.proc==nil.
+	if d.proc != nil {
+		notice := fmt.Sprintf("Switched from %s to %s (stopped dev server: %s).",
+			d.cfg.ProjectPath, cmd.ProjectPath, d.cfg.StartupCommand)
+		d.stopProcess()
+		d.cfg.ProjectPath = cmd.ProjectPath
+		d.cfg.StartupCommand = cmd.StartupCommand
+		return d.listResponseWithNotice(notice)
+	}
+	d.cfg.ProjectPath = cmd.ProjectPath
+	d.cfg.StartupCommand = cmd.StartupCommand
+	return d.listResponse()
+}
+
+func (d *Daemon) listResponseWithNotice(msg string) Event {
+	evt := d.listResponse()
+	evt.Notice = msg
+	return evt
 }
 
 func (d *Daemon) listResponse() Event {
@@ -168,8 +239,17 @@ func (d *Daemon) activate(worktreePath string) {
 func (d *Daemon) stopProcess() {
 	if d.proc != nil {
 		slog.Info("stopping process")
-		d.proc.Stop()
+		// Nil d.proc *before* calling Stop so the activate-watcher goroutine
+		// (waiting on proc.Wait) sees d.proc != proc the instant the child
+		// exits and skips its own Push. Otherwise it could race-fire a
+		// listResponse using stale d.cfg between us killing the process and
+		// the caller mutating cfg / sending the real response.
+		proc := d.proc
 		d.proc = nil
+		proc.Stop()
+		// state.Save after Stop so state.yaml carries the still-valid PID
+		// during the kill window — easier to track down an orphan if the
+		// daemon itself crashes mid-kill.
 		state.Save(&state.State{})
 	}
 }

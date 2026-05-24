@@ -3,6 +3,9 @@
 package daemon
 
 import (
+	"bufio"
+	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,6 +110,172 @@ func TestPIDFileLockSerializes(t *testing.T) {
 	}
 	if _, err := os.Stat(pidFilePath(dir)); !os.IsNotExist(err) {
 		t.Error("PID file should be removed after concurrent TerminateExistingDaemon calls")
+	}
+}
+
+// newRunningDaemon spins up a Daemon with a real "sleep 30" child process so
+// the proc-running set_project branches exercise the actual process state
+// rather than a fake sentinel.
+func newRunningDaemon(t *testing.T, projectPath, startupCmd string) *Daemon {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	sockDir, err := os.MkdirTemp("", "d")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	sockPath := filepath.Join(sockDir, "d.sock")
+	srv, err := NewServer(sockPath)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() { srv.Close(); os.Remove(sockPath) })
+
+	d := &Daemon{
+		cfg: &config.Config{
+			ProjectPath:    projectPath,
+			StartupCommand: startupCmd,
+		},
+		srv:      srv,
+		sockPath: sockPath,
+		shutdown: make(chan struct{}),
+	}
+	d.activate(projectPath)
+	time.Sleep(50 * time.Millisecond)
+	if d.proc == nil {
+		t.Fatal("process should be running after activate")
+	}
+	t.Cleanup(func() { d.stopProcess() })
+	return d
+}
+
+// TestHandleSetProject_DifferentProjectProcRunningNoForce verifies that a
+// running dev server blocks a project switch when Force is false: d.cfg stays
+// put, the process keeps running, and a ConfirmSwitch payload is returned.
+func TestHandleSetProject_DifferentProjectProcRunningNoForce(t *testing.T) {
+	dir := t.TempDir()
+	d := newRunningDaemon(t, dir, "sleep 30")
+	pgid := d.proc.pgid
+
+	evt := d.handleSetProject(Command{
+		Cmd:            "set_project",
+		ProjectPath:    "/proj/elsewhere",
+		StartupCommand: "echo new",
+		Force:          false,
+	})
+
+	if evt.ConfirmSwitch == nil {
+		t.Fatal("expected ConfirmSwitch payload, got nil")
+	}
+	if evt.ConfirmSwitch.FromProject != dir {
+		t.Errorf("FromProject = %q, want %q", evt.ConfirmSwitch.FromProject, dir)
+	}
+	if evt.ConfirmSwitch.ToProject != "/proj/elsewhere" {
+		t.Errorf("ToProject = %q, want %q", evt.ConfirmSwitch.ToProject, "/proj/elsewhere")
+	}
+	if evt.ConfirmSwitch.RunningCommand != "sleep 30" {
+		t.Errorf("RunningCommand = %q, want %q", evt.ConfirmSwitch.RunningCommand, "sleep 30")
+	}
+	if d.cfg.ProjectPath != dir {
+		t.Errorf("ProjectPath mutated to %q despite Force=false", d.cfg.ProjectPath)
+	}
+	if d.cfg.StartupCommand != "sleep 30" {
+		t.Errorf("StartupCommand mutated to %q despite Force=false", d.cfg.StartupCommand)
+	}
+	if d.proc == nil {
+		t.Error("proc cleared despite Force=false")
+	}
+	if err := syscall.Kill(-pgid, 0); err != nil {
+		t.Errorf("process group should still be alive after Force=false: %v", err)
+	}
+}
+
+// TestHandleSetProject_DifferentProjectProcRunningForce verifies that a forced
+// project switch goes through the existing stopProcess path (process group
+// SIGTERM/SIGKILL), mutates d.cfg, and surfaces a notice mentioning the
+// stopped command.
+func TestHandleSetProject_DifferentProjectProcRunningForce(t *testing.T) {
+	dir := t.TempDir()
+	d := newRunningDaemon(t, dir, "sleep 30")
+	pgid := d.proc.pgid
+
+	evt := d.handleSetProject(Command{
+		Cmd:            "set_project",
+		ProjectPath:    "/proj/elsewhere",
+		StartupCommand: "echo new",
+		Force:          true,
+	})
+
+	if evt.ConfirmSwitch != nil {
+		t.Errorf("ConfirmSwitch = %+v, want nil after forced switch", evt.ConfirmSwitch)
+	}
+	if evt.Notice == "" {
+		t.Error("expected non-empty Notice after forced switch")
+	}
+	if d.cfg.ProjectPath != "/proj/elsewhere" {
+		t.Errorf("ProjectPath = %q, want %q", d.cfg.ProjectPath, "/proj/elsewhere")
+	}
+	if d.cfg.StartupCommand != "echo new" {
+		t.Errorf("StartupCommand = %q, want %q", d.cfg.StartupCommand, "echo new")
+	}
+	if d.proc != nil {
+		t.Error("proc should be nil after forced switch")
+	}
+	if err := syscall.Kill(-pgid, 0); err == nil {
+		t.Error("process group should be dead after forced switch")
+	}
+}
+
+// TestHandleSetProject_ForceSwitchEmitsOneEvent locks in the push-race fix in
+// stopProcess: with the fix, a Force-true switch produces exactly one event
+// (the direct response). Without it, the watcher goroutine waiting on
+// proc.Wait can race-fire a stale listResponse Push *before* d.cfg is
+// mutated, and the client would see two events back-to-back.
+func TestHandleSetProject_ForceSwitchEmitsOneEvent(t *testing.T) {
+	dir := t.TempDir()
+	d := newRunningDaemon(t, dir, "sleep 30")
+
+	go func() { _ = d.srv.Accept(d.handle) }()
+
+	conn, err := net.Dial("unix", d.sockPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	cmd := Command{
+		Cmd:            "set_project",
+		ProjectPath:    "/proj/elsewhere",
+		StartupCommand: "echo new",
+		Force:          true,
+	}
+	if err := json.NewEncoder(conn).Encode(cmd); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	scanner := bufio.NewScanner(conn)
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if !scanner.Scan() {
+		t.Fatalf("no first event: %v", scanner.Err())
+	}
+	var evt Event
+	if err := json.Unmarshal(scanner.Bytes(), &evt); err != nil {
+		t.Fatalf("unmarshal first event: %v", err)
+	}
+	if evt.Notice == "" {
+		t.Errorf("first event Notice is empty; want the force-switch notice")
+	}
+	if evt.ConfirmSwitch != nil {
+		t.Errorf("first event ConfirmSwitch = %+v, want nil", evt.ConfirmSwitch)
+	}
+
+	// Drain for spurious extra events. A second event here would mean the
+	// watcher-goroutine race regressed.
+	conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if scanner.Scan() {
+		t.Errorf("unexpected second event after force switch: %s", scanner.Text())
 	}
 }
 

@@ -56,21 +56,27 @@ If you installed via `go install`, the binary lives in `$(go env GOPATH)/bin` (u
 ## Usage
 
 ```bash
-treely              # launch the TUI
-treely -p /path     # override project path for this session
+treely                              # launch the TUI with saved defaults
+treely .                            # use the repo in the current directory
+treely /path/to/project             # override project path for this session
+treely -c "pnpm dev"                # override startup command for this session
+treely /path/to/project -c "pnpm dev"   # override both (flags may go anywhere)
 ```
+
+Positional paths are resolved against your shell's working directory, so `treely .`, `treely ../other-repo`, and absolute paths all work. Flags and the positional path may appear in any order.
 
 On first run, a setup wizard prompts for your project path and the startup command to run (e.g. `npm run dev`). This configures a single project — the one you'll use most often.
 
-**Using a different project:**
+**Using a different project or command:**
 
-Treely stores one project in its config, but you can point it at any project for a session using `-p`:
+Treely stores one project + startup command in its config. You can point it at a different project or change the command for a single session by passing a positional path and/or the `-c` / `--command` flag:
 
 ```bash
-treely -p ~/Source/other-project
+treely ~/Source/other-project
+treely -c "npm run dev:debug"
 ```
 
-This does not change your saved config — the next plain `treely` invocation will still use your default project.
+These overrides do not change your saved config — the next plain `treely` invocation will still use your defaults. If the daemon is already running a dev server for a different project, treely will prompt before stopping it and switching.
 
 **Keys:**
 

@@ -10,8 +10,11 @@ import (
 )
 
 type Command struct {
-	Cmd      string `json:"cmd"`
-	Worktree string `json:"worktree,omitempty"`
+	Cmd            string `json:"cmd"`
+	Worktree       string `json:"worktree,omitempty"`
+	ProjectPath    string `json:"project_path,omitempty"`
+	StartupCommand string `json:"startup_command,omitempty"`
+	Force          bool   `json:"force,omitempty"`
 }
 
 type Worktree struct {
@@ -20,9 +23,18 @@ type Worktree struct {
 	Status string `json:"status"`
 }
 
+type SwitchInfo struct {
+	FromProject    string `json:"from_project"`
+	ToProject      string `json:"to_project"`
+	RunningCommand string `json:"running_command"`
+	ActiveWorktree string `json:"active_worktree"`
+}
+
 type Event struct {
-	Event     string     `json:"event"`
-	Worktrees []Worktree `json:"worktrees,omitempty"`
+	Event         string      `json:"event"`
+	Worktrees     []Worktree  `json:"worktrees,omitempty"`
+	Notice        string      `json:"notice,omitempty"`
+	ConfirmSwitch *SwitchInfo `json:"confirm_switch,omitempty"`
 }
 
 type Server struct {

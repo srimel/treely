@@ -93,6 +93,7 @@ Transport: Unix domain socket, newline-delimited JSON.
 
 **TUI → Daemon (Commands):**
 ```json
+{"cmd":"set_project","project_path":"/abs/path","startup_command":"npm run dev","force":false}
 {"cmd":"list"}
 {"cmd":"activate","worktree":"/abs/path/to/worktree"}
 {"cmd":"stop"}
@@ -105,11 +106,15 @@ Transport: Unix domain socket, newline-delimited JSON.
   "worktrees": [
     {"path": "/abs/path/main", "name": "main", "status": "active"},
     {"path": "/abs/path/feature-x", "name": "feature-x", "status": "inactive"}
-  ]
+  ],
+  "notice": "Startup command updated; takes effect on next activation.",
+  "confirm_switch": null
 }
 ```
 
-`"list"` and `"activate"` both return a `state_changed` event. `"stop"` returns nothing and closes the connection. The daemon also pushes unsolicited `state_changed` events on process crash.
+`"set_project"`, `"list"`, and `"activate"` all return a `state_changed` event. `"set_project"` may instead return a `state_changed` event whose `confirm_switch` field describes the running project — when set, the TUI prompts the user before re-sending with `force: true`. `"stop"` returns nothing and closes the connection. The daemon also pushes unsolicited `state_changed` events on process crash.
+
+**Mutable `d.cfg`.** Originally `d.cfg` was loaded once at daemon startup and never modified. The `set_project` handler now mutates it at runtime (project path and startup command). The on-disk `config.yaml` is never touched — overrides are session-only.
 
 **Deliberate type duplication:** `daemon` and `client` define their own `Command`, `Event`, and `Worktree` types with no shared package. This decouples the two sides of the socket — either can evolve independently as long as the JSON wire format is preserved.
 
@@ -121,19 +126,19 @@ Transport: Unix domain socket, newline-delimited JSON.
 
 ```mermaid
 flowchart TD
-    Init["Init()"] --> sendList["sendList: send 'list' cmd"]
+    Init["Init()"] --> sendSet["sendSetProject: send 'set_project' cmd"]
     Init --> waitForEvent["waitForEvent: block on client.Events"]
     waitForEvent --> eventMsg["eventMsg received"]
-    eventMsg --> refresh["Update: refresh worktree list"]
+    eventMsg --> refresh["Update: refresh worktree list (or enter confirm mode)"]
     refresh --> waitForEvent
     waitForEvent --> errMsg["errMsg: client disconnect"]
     errMsg --> quit["display error and quit"]
 ```
 
-- `Init()` returns two concurrent commands: `sendList` (sends `"list"` and returns nil) and `waitForEvent` (blocks on `<-client.Events`).
-- `Update(eventMsg)` refreshes the worktree list and re-arms `waitForEvent`, creating a continuous event loop.
+- `Init()` returns two concurrent commands: one that sends `"set_project"` (carrying the TUI's effective project path + startup command) and `waitForEvent` (blocks on `<-client.Events`).
+- `Update(eventMsg)` refreshes the worktree list and re-arms `waitForEvent`, creating a continuous event loop. If the event carries a `confirm_switch` payload, the TUI enters confirmation mode instead.
 - `Update(errMsg)` (client disconnect) displays the error and quits.
-- Keyboard: `↑/k`, `↓/j` navigate; `enter/space` activates; `q/ctrl+c` quits.
+- Keyboard: `↑/k`, `↓/j` navigate; `enter/space` activates; `q/ctrl+c` quits. In confirmation mode, only `y` / `n` / `q` / `ctrl+c` are recognized.
 
 ---
 
@@ -170,7 +175,7 @@ pid: 12345
 
 ## Key Design Constraints
 
-- **`-p` flag** overrides `cfg.ProjectPath` in memory after config load. It does not write to `config.yaml`. The daemon always uses the path from `config.yaml` for worktree discovery.
+- **Session-only CLI overrides.** A positional `treely <path>` argument overrides `cfg.ProjectPath` in the TUI's in-memory config, and `-c` / `--command` overrides `cfg.StartupCommand`. Neither writes to `config.yaml`. On connect, the TUI sends a `set_project` handshake; the daemon adopts the override (prompting first if a dev server is running for a different project).
 - **TUI is stateless.** It reconnects on each invocation. Multiple TUI instances can run simultaneously; only the latest one receives daemon events.
 - **No crash state.** Crashed worktrees appear as `"inactive"` — there is no separate crashed status.
 - **Single client at a time.** The server closes the previous client when a new one connects, preventing split-brain.

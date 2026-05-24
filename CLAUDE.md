@@ -35,13 +35,15 @@ Treely is a **single binary that runs in two modes**: TUI client (default) and d
 
 - **Single client at a time.** `Server.Accept` closes the previous client whenever a new one connects. Multiple TUI instances can launch, but only the latest receives daemon `Push` events.
 
-- **`-p` flag is in-memory only.** It overrides `cfg.ProjectPath` after load but never writes to `config.yaml`. The daemon always uses the path persisted in `config.yaml` for worktree discovery — `-p` only affects the TUI's view.
+- **Session-only CLI overrides.** A positional `treely <path>` overrides `cfg.ProjectPath`, and `-c` / `--command` overrides `cfg.StartupCommand`. Neither writes to `config.yaml`. On connect the TUI sends a `set_project` IPC handshake; the daemon mutates its in-memory `d.cfg` (project path and startup command) at runtime. If a dev server for a different project is already running, the daemon returns a `confirm_switch` event so the TUI can prompt before killing it.
+
+- **`d.cfg` is mutable at runtime.** Originally loaded once at daemon startup, `d.cfg` is now updated by the `set_project` handler in `internal/daemon/daemon.go`. The on-disk `config.yaml` is never touched by that path.
 
 - **Bare-repo layout fallback.** `daemon.findGitRoot` checks one level of subdirectories if `ProjectPath` itself is not a git repo, supporting the bare-repo-plus-linked-worktrees layout (e.g. `~/Source/my-app/my-app.git`).
 
 ### TUI event loop
 
-`tui.Model.Init` returns a `tea.Batch` of two commands: one that sends `"list"`, and `waitForEvent` which blocks on `<-client.Events`. Every `eventMsg` handler re-arms `waitForEvent`, so the event loop is self-sustaining. A closed `Events` channel produces an `errMsg` that quits the program.
+`tui.Model.Init` returns a `tea.Batch` of two commands: one that sends `"set_project"` (carrying the TUI's effective project + startup command), and `waitForEvent` which blocks on `<-client.Events`. Every `eventMsg` handler re-arms `waitForEvent`, so the event loop is self-sustaining. A closed `Events` channel produces an `errMsg` that quits the program. When an event carries `confirm_switch`, the TUI enters a modal mode and only `y` / `n` / `q` / `ctrl+c` are recognized until the user resolves it.
 
 ### Files at `~/.treely/`
 
@@ -54,7 +56,7 @@ Treely is a **single binary that runs in two modes**: TUI client (default) and d
 
 ### Platform-specific code
 
-Daemon detachment and process group handling are split by build tag: `fork_unix.go` / `fork_windows.go` for `SysProcAttr`, and `process_unix.go` / `process_windows.go` for `StartProcess`/`Stop`. CI matrix runs Go 1.22 and 1.23 on Ubuntu only (see `.github/workflows/ci.yml`); Windows code is build-tag-gated but not exercised in CI.
+Daemon detachment and process group handling are split by build tag: `fork_unix.go` / `fork_windows.go` for `SysProcAttr`, and `process_unix.go` / `process_windows.go` for `StartProcess`/`Stop`. CI matrix runs Go 1.24 and `stable` on Ubuntu only (see `.github/workflows/ci.yml`); Windows code is build-tag-gated but not exercised in CI.
 
 ## See also
 
