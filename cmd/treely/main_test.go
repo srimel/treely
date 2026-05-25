@@ -19,6 +19,11 @@ func TestResolvePositionalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Build a platform-correct absolute path. On Windows filepath.IsAbs requires
+	// a volume prefix (e.g. "C:\"); on Unix the root is just "/".
+	vol := filepath.VolumeName(cwd)
+	absPath := filepath.Join(vol+string(filepath.Separator), "already", "abs")
+
 	tests := []struct {
 		name string
 		in   string
@@ -26,7 +31,7 @@ func TestResolvePositionalPath(t *testing.T) {
 	}{
 		{"empty stays empty", "", ""},
 		{"dot becomes cwd", ".", cwd},
-		{"absolute is unchanged", "/already/abs", "/already/abs"},
+		{"absolute is unchanged", absPath, absPath},
 		{"relative joins cwd", "child", filepath.Join(cwd, "child")},
 	}
 	for _, tt := range tests {
@@ -43,9 +48,26 @@ func TestResolvePositionalPath(t *testing.T) {
 // inherits from filepath.Abs but is hard to exercise cross-platform without
 // destroying the test process's cwd.
 func TestResolvePositionalPathWith(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Derive a volume prefix so all test paths are genuinely absolute on both
+	// Unix ("") and Windows ("C:"). filepath.IsAbs requires a volume on Windows.
+	vol := filepath.VolumeName(cwd)
+	root := vol + string(filepath.Separator)
+	fakeCwd := filepath.Join(root, "fixed", "cwd")
+
 	stubErr := errors.New("simulated getwd failure")
 	stubFail := func() (string, error) { return "", stubErr }
-	stubOK := func() (string, error) { return "/fixed/cwd", nil }
+	stubOK := func() (string, error) { return fakeCwd, nil }
+
+	absPath := filepath.Join(root, "already", "abs")
+	// A dirty absolute path that filepath.Clean normalises to absClean.
+	sep := string(filepath.Separator)
+	absDirty := root + "a" + sep + sep + "b" + sep + ".." + sep + "c"
+	absClean := filepath.Join(root, "a", "c")
 
 	tests := []struct {
 		name  string
@@ -54,9 +76,9 @@ func TestResolvePositionalPathWith(t *testing.T) {
 		want  string
 	}{
 		{"empty stays empty", "", stubFail, ""},
-		{"absolute skips getwd", "/already/abs", stubFail, "/already/abs"},
-		{"absolute is cleaned", "/a//b/../c", stubFail, "/a/c"},
-		{"relative joins cwd", "child", stubOK, "/fixed/cwd/child"},
+		{"absolute skips getwd", absPath, stubFail, absPath},
+		{"absolute is cleaned", absDirty, stubFail, absClean},
+		{"relative joins cwd", "child", stubOK, filepath.Join(fakeCwd, "child")},
 		{"relative falls back on getwd error", "child", stubFail, "child"},
 		{"dot falls back on getwd error", ".", stubFail, "."},
 	}

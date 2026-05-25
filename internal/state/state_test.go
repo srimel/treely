@@ -10,9 +10,8 @@ func TestSaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	trelyDir := filepath.Join(tmpDir, ".treely")
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir) // Windows uses USERPROFILE instead of HOME
 
 	if err := os.MkdirAll(trelyDir, 0755); err != nil {
 		t.Fatal(err)
@@ -44,9 +43,8 @@ func TestLoadMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	trelyDir := filepath.Join(tmpDir, ".treely")
 
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir) // Windows uses USERPROFILE instead of HOME
 
 	// Ensure the directory does NOT have state.yaml
 	_ = os.MkdirAll(trelyDir, 0755)

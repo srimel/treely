@@ -38,9 +38,8 @@ func TestExpandHome(t *testing.T) {
 
 func TestLoadExpandsHomeTilde(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir) // Windows uses USERPROFILE instead of HOME
 
 	trelyDir := filepath.Join(tmpDir, ".treely")
 	if err := os.MkdirAll(trelyDir, 0755); err != nil {
@@ -69,14 +68,11 @@ func TestLoadExpandsHomeTilde(t *testing.T) {
 }
 
 func TestSaveAndLoad(t *testing.T) {
-	// Use a temp directory as the home directory
 	tmpDir := t.TempDir()
 	trelyDir := filepath.Join(tmpDir, ".treely")
 
-	// Override Dir() by temporarily patching UserHomeDir via env
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir) // Windows uses USERPROFILE instead of HOME
 
 	cfg := &Config{
 		ProjectPath:    "/tmp/my-project",

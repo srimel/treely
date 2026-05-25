@@ -92,30 +92,33 @@ func TestFindGitRoot_NoGitRepo(t *testing.T) {
 
 func setupConfig(t *testing.T) {
 	t.Helper()
-	cfgDir, err := config.Dir()
+
+	// Redirect home to a temp dir so the daemon never reads or writes the
+	// developer's real ~/.treely files. t.Setenv restores both vars on cleanup.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome) // Windows uses USERPROFILE instead of HOME
+
+	trelyDir := filepath.Join(tmpHome, ".treely")
+	if err := os.MkdirAll(trelyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Point the config at the repo root (two levels up from internal/daemon),
+	// which is a valid git repo and will produce real worktree output.
+	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := filepath.Join(cfgDir, "config.yaml")
-	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		wd, err := os.Getwd()
-		if err != nil {
-			t.Fatal(err)
-		}
-		repoRoot, err := filepath.Abs(filepath.Join(wd, "..", ".."))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(cfgDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := config.Save(&config.Config{
-			ProjectPath:    repoRoot,
-			StartupCommand: "echo test",
-		}); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { os.Remove(cfgPath) })
+	repoRoot, err := filepath.Abs(filepath.Join(wd, "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(&config.Config{
+		ProjectPath:    repoRoot,
+		StartupCommand: "echo test",
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
