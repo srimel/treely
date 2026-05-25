@@ -19,7 +19,7 @@ The binary self-forks with `--daemon` on first invocation if no socket exists at
 
 ## Architecture
 
-Treely is a **single binary that runs in two modes**: TUI client (default) and daemon (`--daemon`). They communicate over a Unix socket (`~/.treely/daemon.sock`) using **newline-delimited JSON**. The TUI is stateless and reconnects on every invocation; the daemon is detached (`Setsid` on Unix) and owns the child dev server.
+Treely is a **single binary that runs in two modes**: TUI client (default) and daemon (`--daemon`). They communicate over a Unix socket (`~/.treely/daemon.sock`) using **newline-delimited JSON**. The TUI is stateless and reconnects on every invocation; the daemon is detached (`Setsid` on Unix, `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` on Windows) and owns the child dev server.
 
 ### Constraints that span files
 
@@ -31,7 +31,7 @@ Treely is a **single binary that runs in two modes**: TUI client (default) and d
 
 - **No "crashed" state.** When the child dev server exits for any reason, the goroutine in `daemon.activate` (waiting on `proc.Wait()`) nils `d.proc`, writes an empty `state.yaml`, and pushes a `state_changed` event. Crashed worktrees appear as `"inactive"`.
 
-- **Process group lifecycle.** `StartProcess` runs `sh -c <startup_command>` with `Setpgid: true`. `Stop` signals the entire group with `SIGTERM`, polls for exit, then escalates to `SIGKILL` after 5s — this is the only way to guarantee a dev server's grandchildren release their ports before the next worktree is activated.
+- **Process group lifecycle.** `StartProcess` runs the user's startup command through a platform-specific shell — `sh -c` on Unix, `powershell.exe -NoProfile -NonInteractive -Command` on Windows — with the child placed in a process group (`Setpgid` on Unix) or Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` on Windows). `Stop` signals the entire group with `SIGTERM` on Unix (polling 5s then `SIGKILL`), or calls `TerminateJobObject` on Windows — this is the only way to guarantee a dev server's grandchildren release their ports before the next worktree is activated.
 
 - **Single client at a time.** `Server.Accept` closes the previous client whenever a new one connects. Multiple TUI instances can launch, but only the latest receives daemon `Push` events.
 

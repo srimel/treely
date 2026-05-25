@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +47,9 @@ func Run(sockPath, dir string, debug bool) error {
 
 	srv, err := NewServer(sockPath)
 	if err != nil {
+		if runtime.GOOS == "windows" && isAFUnixError(err) {
+			return fmt.Errorf("AF_UNIX socket support requires Windows 10 1803+ or Windows Server 2019+: %w", err)
+		}
 		return err
 	}
 
@@ -256,7 +259,7 @@ func (d *Daemon) stopProcess() {
 
 func (d *Daemon) discoverWorktrees() []Worktree {
 	gitRoot := findGitRoot(d.cfg.ProjectPath)
-	out, err := exec.Command("git", "-C", gitRoot, "worktree", "list", "--porcelain").Output()
+	out, err := silentCommand("git", "-C", gitRoot, "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		slog.Warn("git worktree list failed", "err", err)
 		return nil
@@ -291,7 +294,7 @@ func findGitRoot(path string) string {
 }
 
 func isGitRepo(path string) bool {
-	return exec.Command("git", "-C", path, "rev-parse", "--git-dir").Run() == nil
+	return silentCommand("git", "-C", path, "rev-parse", "--git-dir").Run() == nil
 }
 
 func parseWorktrees(output, projectPath string) []Worktree {

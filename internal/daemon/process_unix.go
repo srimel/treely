@@ -19,7 +19,8 @@ type Process struct {
 // StartProcess spawns command in a new process group so the entire tree
 // (shell + grandchildren) can be signalled as a unit on stop.
 func StartProcess(command, dir string) (*Process, error) {
-	cmd := exec.Command("sh", "-c", command)
+	name, args := shellCommand(command)
+	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
