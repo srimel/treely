@@ -11,7 +11,7 @@ var (
 			Foreground(lipgloss.Color("46")) // green
 
 	inactiveStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")) // dim
+			Foreground(lipgloss.Color("252")) // dim
 
 	cursorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("205")).
@@ -23,7 +23,7 @@ var (
 			Padding(0, 1)
 
 	footerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+			Foreground(lipgloss.Color("252"))
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")) // red
