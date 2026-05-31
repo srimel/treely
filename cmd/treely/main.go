@@ -16,12 +16,22 @@ import (
 	"github.com/srimel/treely/internal/tui"
 )
 
+// version is set via -ldflags at release time (see .goreleaser.yml).
+var version = "dev"
+
 func main() {
 	daemonMode := pflag.Bool("daemon", false, "run as daemon")
 	debugMode := pflag.Bool("debug", false, "enable debug logging to ~/.treely/daemon.log")
 	cmdOverride := pflag.StringP("command", "c", "", "startup command override (session only)")
 	restartDaemon := pflag.Bool("restart-daemon", false, "restart the background daemon")
+	showVersion := pflag.BoolP("version", "v", false, "print version and exit")
 	pflag.Parse()
+
+	if *showVersion {
+		fmt.Printf("treely %s\n", version)
+		return
+	}
+
 	positionalPath := resolvePositionalPath(pflag.Arg(0))
 
 	dir, err := config.Dir()
@@ -90,7 +100,7 @@ func main() {
 	}
 	defer c.Close()
 
-	m := tui.NewModel(cfg, c, sockPath, dir, *debugMode)
+	m := tui.NewModel(cfg, c, sockPath, dir, *debugMode, version)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()
 	if err != nil {
