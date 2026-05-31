@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/srimel/treely/internal/config"
 )
@@ -131,5 +132,44 @@ func TestResolveConfig(t *testing.T) {
 func TestResolveConfig_NilInput(t *testing.T) {
 	if got := resolveConfig(nil, "/x", "y"); got != nil {
 		t.Errorf("resolveConfig(nil, ...) = %+v, want nil", got)
+	}
+}
+
+// --- waitForSocketGone ---
+
+func TestWaitForSocketGone_ReturnsTrueWhenSocketDeleted(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "test.sock")
+	if err := os.WriteFile(sockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		os.Remove(sockPath)
+	}()
+	if !waitForSocketGone(sockPath, 2*time.Second) {
+		t.Error("waitForSocketGone = false, want true when socket is deleted before timeout")
+	}
+}
+
+func TestWaitForSocketGone_ReturnsFalseWhenSocketPersists(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "persistent.sock")
+	if err := os.WriteFile(sockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	result := waitForSocketGone(sockPath, 150*time.Millisecond)
+	elapsed := time.Since(start)
+	if result {
+		t.Error("waitForSocketGone = true, want false when socket is never deleted")
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Errorf("returned too quickly (%v); should poll until timeout", elapsed)
+	}
+}
+
+func TestWaitForSocketGone_ReturnsTrueWhenSocketNeverExisted(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "nonexistent.sock")
+	if !waitForSocketGone(sockPath, 1*time.Second) {
+		t.Error("waitForSocketGone = false for a path that never existed, want true")
 	}
 }

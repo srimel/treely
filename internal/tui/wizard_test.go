@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestIsGitRepo_DotGitDir(t *testing.T) {
@@ -133,5 +135,157 @@ func TestIsTreelyCompatible_NoRepoNearby(t *testing.T) {
 	}
 	if isTreelyCompatible(parent) {
 		t.Errorf("isTreelyCompatible(%q) = true, want false when no repo is at the dir or one level down", parent)
+	}
+}
+
+// --- WizardModel.Update() state machine ---
+
+func TestWizardUpdate_WindowSizeMsg_SetsSize(t *testing.T) {
+	m := NewWizardModel()
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.width != 100 || got.height != 50 {
+		t.Errorf("size = %dx%d, want 100x50", got.width, got.height)
+	}
+}
+
+func TestWizardUpdate_CtrlC_Quits(t *testing.T) {
+	m := NewWizardModel()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Error("expected non-nil cmd (tea.Quit) from ctrl+c")
+	}
+}
+
+func TestWizardUpdate_Tab_SwitchesFocusForwardFrom0(t *testing.T) {
+	m := NewWizardModel()
+	if m.focused != 0 {
+		t.Fatalf("initial focused = %d, want 0", m.focused)
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.focused != 1 {
+		t.Errorf("focused = %d after Tab from 0, want 1", got.focused)
+	}
+}
+
+func TestWizardUpdate_Tab_WrapsAroundFrom1(t *testing.T) {
+	m := NewWizardModel()
+	m.focused = 1
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.focused != 0 {
+		t.Errorf("focused = %d after Tab from 1, want 0 (wrap)", got.focused)
+	}
+}
+
+func TestWizardUpdate_ShiftTab_SwitchesFocusBackwardFrom1(t *testing.T) {
+	m := NewWizardModel()
+	m.focused = 1
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.focused != 0 {
+		t.Errorf("focused = %d after ShiftTab from 1, want 0", got.focused)
+	}
+}
+
+func TestWizardUpdate_ShiftTab_WrapsAroundFrom0(t *testing.T) {
+	m := NewWizardModel()
+	// focused == 0 by default
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.focused != 1 {
+		t.Errorf("focused = %d after ShiftTab from 0, want 1 (wrap)", got.focused)
+	}
+}
+
+func TestWizardUpdate_Enter_FocusedOnCmd_BothSet_SetsResultAndQuits(t *testing.T) {
+	m := NewWizardModel()
+	m.focused = 1
+	m.selectedPath = "/some/project"
+	m.cmdInput.SetValue("npm run dev")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.Result == nil {
+		t.Fatal("Result should be set after entering valid path and command")
+	}
+	if got.Result.ProjectPath != "/some/project" {
+		t.Errorf("Result.ProjectPath = %q, want /some/project", got.Result.ProjectPath)
+	}
+	if got.Result.StartupCommand != "npm run dev" {
+		t.Errorf("Result.StartupCommand = %q, want 'npm run dev'", got.Result.StartupCommand)
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit cmd after successful wizard completion")
+	}
+}
+
+func TestWizardUpdate_Enter_FocusedOnCmd_CmdIsWhitespaceOnly_IsNoOp(t *testing.T) {
+	m := NewWizardModel()
+	m.focused = 1
+	m.selectedPath = "/some/project"
+	m.cmdInput.SetValue("   ") // TrimSpace → empty
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.Result != nil {
+		t.Error("Result should not be set when trimmed command is empty")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd when command is blank")
+	}
+}
+
+func TestWizardUpdate_Enter_FocusedOnCmd_NoPath_IsNoOp(t *testing.T) {
+	m := NewWizardModel()
+	m.focused = 1
+	m.selectedPath = ""
+	m.cmdInput.SetValue("npm run dev")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.Result != nil {
+		t.Error("Result should not be set when path is missing")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd when path is empty")
+	}
+}
+
+func TestWizardUpdate_Enter_FocusedOnPicker_DoesNotCompleteWizard(t *testing.T) {
+	m := NewWizardModel()
+	// focused == 0 (picker); enter navigates the picker, not the wizard confirm
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got, ok := next.(WizardModel)
+	if !ok {
+		t.Fatalf("expected WizardModel, got %T", next)
+	}
+	if got.Result != nil {
+		t.Error("Result should not be set when pressing enter on the file picker")
 	}
 }
