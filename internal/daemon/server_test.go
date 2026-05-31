@@ -73,7 +73,14 @@ func TestServer_SecondClientReplacesFirst(t *testing.T) {
 	}
 	defer srv.Close()
 
+	// The handler signals on its first invocation, which happens only after
+	// s.client has been set for conn1 — no time.Sleep needed.
+	conn1Registered := make(chan struct{}, 1)
 	go srv.Accept(func(cmd Command) (interface{}, bool) { //nolint:errcheck
+		select {
+		case conn1Registered <- struct{}{}:
+		default:
+		}
 		return nil, true
 	})
 
@@ -81,8 +88,15 @@ func TestServer_SecondClientReplacesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial conn1: %v", err)
 	}
-	// Give the server time to register conn1.
-	time.Sleep(50 * time.Millisecond)
+	defer conn1.Close()
+
+	// Drive the handler so we know conn1 is registered in s.client.
+	conn1.Write([]byte("{\"cmd\":\"list\"}\n"))
+	select {
+	case <-conn1Registered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for conn1 to be registered")
+	}
 
 	conn2, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -90,8 +104,8 @@ func TestServer_SecondClientReplacesFirst(t *testing.T) {
 	}
 	defer conn2.Close()
 
-	// conn1 should be closed by the server when conn2 connects.
-	conn1.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	// conn1 should be closed by the server when conn2 is accepted.
+	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 1)
 	_, err = conn1.Read(buf)
 	if err == nil {
@@ -107,7 +121,13 @@ func TestServer_Push_DeliveresToConnectedClient(t *testing.T) {
 	}
 	defer srv.Close()
 
+	// Handler signals when it runs; by that point s.client is already set.
+	registered := make(chan struct{}, 1)
 	go srv.Accept(func(cmd Command) (interface{}, bool) { //nolint:errcheck
+		select {
+		case registered <- struct{}{}:
+		default:
+		}
 		return nil, true
 	})
 
@@ -117,8 +137,13 @@ func TestServer_Push_DeliveresToConnectedClient(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Give the server time to register the client connection.
-	time.Sleep(50 * time.Millisecond)
+	// Send a command to trigger the handler; once it fires s.client is set.
+	conn.Write([]byte("{\"cmd\":\"list\"}\n"))
+	select {
+	case <-registered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client to be registered in server")
+	}
 
 	evt := Event{
 		Event:     "state_changed",
