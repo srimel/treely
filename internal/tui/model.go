@@ -40,6 +40,7 @@ type Model struct {
 	sockPath           string
 	dir                string
 	debug              bool
+	version            string
 	worktrees          []client.Worktree
 	cursor             int
 	width              int
@@ -54,11 +55,11 @@ type Model struct {
 	ActiveWorktreeName string
 }
 
-func NewModel(cfg *config.Config, c *client.Client, sockPath, dir string, debug bool) Model {
+func NewModel(cfg *config.Config, c *client.Client, sockPath, dir string, debug bool, version string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	return Model{cfg: cfg, client: c, sockPath: sockPath, dir: dir, debug: debug, spinner: s}
+	return Model{cfg: cfg, client: c, sockPath: sockPath, dir: dir, debug: debug, version: version, spinner: s}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -333,7 +334,11 @@ func (m Model) View() string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(footerStyle.Render("↑↓/jk navigate · enter/space activate · R restart daemon · K kill daemon · q quit"))
+	footer := "↑↓/jk navigate · enter/space activate · R restart daemon · K kill daemon · q quit"
+	if m.version != "" {
+		footer = fmt.Sprintf("%s · v%s", footer, m.version)
+	}
+	sb.WriteString(footerStyle.Render(footer))
 
 	return lipgloss.NewStyle().MarginLeft(margin).Render(
 		borderStyle.Width(contentWidth + 2).Render(sb.String()),
