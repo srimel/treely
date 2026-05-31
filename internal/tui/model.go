@@ -334,7 +334,11 @@ func (m Model) View() string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(footerStyle.Render(fmt.Sprintf("↑↓/jk navigate · enter/space activate · R restart daemon · K kill daemon · q quit · v%s", m.version)))
+	footer := "↑↓/jk navigate · enter/space activate · R restart daemon · K kill daemon · q quit"
+	if m.version != "" {
+		footer = fmt.Sprintf("%s · v%s", footer, m.version)
+	}
+	sb.WriteString(footerStyle.Render(footer))
 
 	return lipgloss.NewStyle().MarginLeft(margin).Render(
 		borderStyle.Width(contentWidth + 2).Render(sb.String()),

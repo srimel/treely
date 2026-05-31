@@ -20,6 +20,16 @@ import (
 var version = "dev"
 
 func main() {
+	// pflag treats single-dash multi-char args as shorthand chains, so
+	// `-version` would be parsed as `-v -e -r -s -i -o -n`. Pre-scan args
+	// so that `treely -version` works alongside `--version` and `-v`.
+	for _, arg := range os.Args[1:] {
+		if arg == "-version" {
+			fmt.Printf("treely %s\n", version)
+			return
+		}
+	}
+
 	daemonMode := pflag.Bool("daemon", false, "run as daemon")
 	debugMode := pflag.Bool("debug", false, "enable debug logging to ~/.treely/daemon.log")
 	cmdOverride := pflag.StringP("command", "c", "", "startup command override (session only)")
